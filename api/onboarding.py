@@ -1,10 +1,15 @@
-from fastapi import FastAPI
+from http.server import BaseHTTPRequestHandler
+import json
 
-app = FastAPI()
+class handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        # Réponse simple pour tester que Vercel marche
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
 
-@app.get("/")
-def test():
-    return {"status": "ok", "message": "Automata Engine Python API online"}
-
-handler = app
-
+        body = {
+            "status": "ok",
+            "message": "Automata Engine Python est en ligne"
+        }
+        self.wfile.write(json.dumps(body).encode("utf-8"))
