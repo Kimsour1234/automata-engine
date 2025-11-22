@@ -27,7 +27,7 @@ def send_monitoring(automata, client, module, status, message):
     try:
         airtable_api = os.environ.get("AIRTABLE_API_KEY")
         base_id = os.environ.get("AIRTABLE_BASE_ID")
-        table = os.environ.get("AIRTABLE_MONITORING_TABLE")
+        table = os.environ.get("AIRTABLE_TABLE_NAME")
 
         url = f"https://api.airtable.com/v0/{base_id}/{table}"
 
