@@ -32,16 +32,17 @@ def send_monitoring(automata, client, module, status, message):
         url = f"https://api.airtable.com/v0/{base_id}/{table}"
 
         payload = {
-            "fields": {
-                "Automata": automata,
-                "Client": client,
-                "Type": "Log",
-                "Statut": status,   # "Succès" / "Erreur"
-                "Module": module,
-                "Message": message,
-                "Date": datetime.datetime.utcnow().isoformat() + "Z"
-            }
-        }
+    "fields": {
+        "Name": f"Log {datetime.datetime.utcnow().isoformat()}",
+        "Automata": automata,
+        "Client": client,
+        "Type": "Log",
+        "Statut": status,
+        "Module": module,
+        "Message": message,
+        "Date": datetime.datetime.utcnow().isoformat() + "Z"
+    }
+}
 
         headers = {
             "Authorization": f"Bearer {airtable_api}",
