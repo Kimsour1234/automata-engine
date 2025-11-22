@@ -192,11 +192,13 @@ class handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length)
         data = json.loads(body.decode("utf-8"))
 
-        client_name = data.get("client_name")
+        client_name = data.get("client_name")          # Nom du client
+        company_name = data.get("company_name")        # Nom de l'entreprise (NOUVEAU)
+        year = int(data.get("year", 2025))
         trigger = data.get("trigger", "create_folders")
 
         if trigger == "create_folders":
-            response = automata_onboarding(client_name)
+            response = automata_onboarding(client_name, company_name, year)
         else:
             response = {"error": "Unknown trigger"}
 
