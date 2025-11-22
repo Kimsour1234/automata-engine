@@ -33,7 +33,7 @@ def send_monitoring(automata, client, module, status, message):
 
         payload = {
     "fields": {
-        "Name": f"Log {datetime.datetime.utcnow().isoformat()}",
+        "Monitoring": f"Log {datetime.datetime.utcnow().isoformat()}",
         "Automata": automata,
         "Client": client,
         "Type": "Log",
