@@ -80,6 +80,7 @@ def automata_onboarding(client_name, company_name, year):
         )
 
         drive = build("drive", "v3", credentials=creds)
+        raise Exception("Test erreur volontaire")
 
         # Année + mois français
         now = datetime.datetime.utcnow()
