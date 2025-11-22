@@ -6,7 +6,7 @@ import requests
 
 
 # --------------------------------------------------
-# Création dossier Google Drive
+# Google Drive : création de dossier
 # --------------------------------------------------
 
 def create_folder(drive, name, parent_id):
@@ -23,7 +23,7 @@ def create_folder(drive, name, parent_id):
 # Monitoring Airtable
 # --------------------------------------------------
 
-def send_monitoring(module, status, message):
+def send_monitoring(automata, client, module, status, message):
     try:
         airtable_api = os.environ.get("AIRTABLE_API_KEY")
         base_id = os.environ.get("AIRTABLE_BASE_ID")
@@ -34,8 +34,8 @@ def send_monitoring(module, status, message):
         payload = {
             "fields": {
                 "Monitoring": f"Log {datetime.datetime.utcnow().isoformat()}",
-                "Automata": "UpdateYear",
-                "Client": "",
+                "Automata": automata,
+                "Client": client,    # ← FIX
                 "Type": "Log",
                 "Statut": status,
                 "Module": module,
@@ -49,21 +49,147 @@ def send_monitoring(module, status, message):
             "Content-Type": "application/json"
         }
 
-        requests.post(url, json=payload, headers=headers)
+        r = requests.post(url, json=payload, headers=headers)
+        print("MONITORING:", r.status_code, r.text)
 
-    except:
-        pass
-
+    except Exception as e:
+        print("Monitoring error:", e)
 
 
 # --------------------------------------------------
-# Automata Year Update Engine
+# Automata Onboarding
 # --------------------------------------------------
 
-def update_year_engine(ids, year):
+def automata_onboarding(client_name, company_name, year):
 
     try:
-        # Auth Google
+        service_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+        clients_root = os.environ.get("CLIENTS_ROOT_ID")
+
+        if not service_json or not clients_root:
+            return {"error": "Missing environment variables"}
+
+        service_info = json.loads(service_json)
+
+        creds = service_account.Credentials.from_service_account_info(
+            service_info,
+            scopes=["https://www.googleapis.com/auth/drive"]
+        )
+
+        drive = build("drive", "v3", credentials=creds)
+
+        now = datetime.datetime.utcnow()
+        year_str = str(now.year)
+
+        mois_fr = [
+            "01-Janvier", "02-Février", "03-Mars", "04-Avril",
+            "05-Mai", "06-Juin", "07-Juillet", "08-Août",
+            "09-Septembre", "10-Octobre", "11-Novembre", "12-Décembre"
+        ]
+
+        # ----------------------------
+        # Dossier Client = client + entreprise
+        # ----------------------------
+        folder_name = f"{client_name} {company_name}".strip()
+        client_folder = create_folder(drive, folder_name, clients_root)
+
+        # ----------------------------
+        # Factures
+        # ----------------------------
+        factures = create_folder(drive, "Factures", client_folder)
+        factures_year = create_folder(drive, year_str, factures)
+        for m in mois_fr:
+            create_folder(drive, m, factures_year)
+
+        # ----------------------------
+        # Backups
+        # ----------------------------
+        backups = create_folder(drive, "Backups", client_folder)
+
+        backup_factures = create_folder(drive, "Factures", backups)
+        backup_factures_year = create_folder(drive, year_str, backup_factures)
+        for m in mois_fr:
+            create_folder(drive, m, backup_factures_year)
+
+        backup_relances = create_folder(drive, "Relances", backups)
+        backup_relances_year = create_folder(drive, year_str, backup_relances)
+        for m in mois_fr:
+            create_folder(drive, m, backup_relances_year)
+
+        # ----------------------------
+        # Devis
+        # ----------------------------
+        devis = create_folder(drive, "Devis", client_folder)
+        devis_year = create_folder(drive, year_str, devis)
+        for m in mois_fr:
+            create_folder(drive, m, devis_year)
+
+        # ----------------------------
+        # Docs → Relances R1/R2/R3
+        # ----------------------------
+        docs = create_folder(drive, "Docs", client_folder)
+        docs_relances = create_folder(drive, "Relances", docs)
+
+        r1 = create_folder(drive, "R1", docs_relances)
+        r2 = create_folder(drive, "R2", docs_relances)
+        r3 = create_folder(drive, "R3", docs_relances)
+
+        # ----------------------------
+        # Contrats
+        # ----------------------------
+        contrats = create_folder(drive, "Contrats", client_folder)
+        contrats_year = create_folder(drive, year_str, contrats)
+        for m in mois_fr:
+            create_folder(drive, m, contrats_year)
+
+        # ----------------------------
+        # Monitoring
+        # ----------------------------
+        send_monitoring(
+            automata="Onboarding",
+            client=f"{client_name} {company_name}",
+            module="Python Engine - Onboarding",
+            status="Succès",
+            message=f"Onboarding complet pour {client_name} {company_name}"
+        )
+
+        # ----------------------------
+        # Retour complet des IDs
+        # ----------------------------
+        return {
+            "status": "success",
+            "client_folder_id_python": client_folder,
+
+            "factures_folder_id_python": factures,
+            "backups_factures_folder_id_python": backup_factures,
+            "backups_relances_folder_id_python": backup_relances,
+
+            "devis_folder_id_python": devis,
+            "contrats_folder_id_python": contrats,
+
+            "docs_relances_folder_id_python": docs_relances,
+            "R1_folder_id_python": r1,
+            "R2_folder_id_python": r2,
+            "R3_folder_id_python": r3
+        }
+
+    except Exception as e:
+        send_monitoring(
+            automata="Onboarding",
+            client=f"{client_name} {company_name}",
+            module="Python Engine - Onboarding",
+            status="Erreur",
+            message=str(e)
+        )
+        return {"status": "error", "message": str(e)}
+
+
+# --------------------------------------------------
+# Update Year (création automatique année + mois)
+# --------------------------------------------------
+
+def update_year(parent_ids, new_year, client_name):
+    try:
         service_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
         service_info = json.loads(service_json)
 
@@ -74,63 +200,39 @@ def update_year_engine(ids, year):
 
         drive = build("drive", "v3", credentials=creds)
 
-        # Mois FR
         mois_fr = [
             "01-Janvier", "02-Février", "03-Mars", "04-Avril",
             "05-Mai", "06-Juin", "07-Juillet", "08-Août",
             "09-Septembre", "10-Octobre", "11-Novembre", "12-Décembre"
         ]
 
-        new_year = str(year)
+        created = []
 
-        results = {}
-
-        # --- Fonction interne : créer année + mois ---
-        def create_year_if_missing(parent_id, label):
-            response = drive.files().list(
-                q=f"'{parent_id}' in parents and name = '{new_year}' and mimeType='application/vnd.google-apps.folder'",
-                fields="files(id, name)"
-            ).execute()
-
-            if response.get("files"):
-                # L'année existe déjà
-                return response["files"][0]["id"]
-
-            # L'année n'existe pas → on la crée
-            year_id = create_folder(drive, new_year, parent_id)
-
-            # créer 12 mois
+        for parent in parent_ids:
+            year_folder = create_folder(drive, new_year, parent)
             for m in mois_fr:
-                create_folder(drive, m, year_id)
-
-            return year_id
-
-
-        # Créer année dans tous les dossiers parents
-        results["factures_year_id"] = create_year_if_missing(ids["factures"], "Factures")
-        results["backup_factures_year_id"] = create_year_if_missing(ids["backup_factures"], "Backup Factures")
-        results["backup_relances_year_id"] = create_year_if_missing(ids["backup_relances"], "Backup Relances")
-        results["devis_year_id"] = create_year_if_missing(ids["devis"], "Devis")
-        results["contrats_year_id"] = create_year_if_missing(ids["contrats"], "Contrats")
+                create_folder(drive, m, year_folder)
+            created.append(year_folder)
 
         send_monitoring(
-            "UpdateYear Engine",
-            "Succès",
-            f"Année {new_year} créée pour tous les dossiers parents"
+            automata="UpdateYear",
+            client=client_name,
+            module="Python Engine - UpdateYear",
+            status="Succès",
+            message=f"Année {new_year} créée"
         )
 
-        return {"status": "success", "year": new_year, "ids": results}
+        return {"status": "success", "year_folder_ids": created}
 
     except Exception as e:
-
         send_monitoring(
-            "UpdateYear Engine",
-            "Erreur",
-            str(e)
+            automata="UpdateYear",
+            client=client_name,
+            module="Python Engine - UpdateYear",
+            status="Erreur",
+            message=str(e)
         )
-
         return {"status": "error", "message": str(e)}
-
 
 
 # --------------------------------------------------
@@ -144,18 +246,24 @@ class handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length)
         data = json.loads(body.decode("utf-8"))
 
-        # IDs envoyés depuis Make
-        ids = {
-            "factures": data.get("factures_id"),
-            "backup_factures": data.get("backup_factures_id"),
-            "backup_relances": data.get("backup_relances_id"),
-            "devis": data.get("devis_id"),
-            "contrats": data.get("contrats_id")
-        }
+        trigger = data.get("trigger")
 
-        year = int(data.get("year"))
+        if trigger == "create_folders":
+            response = automata_onboarding(
+                data.get("client_name"),
+                data.get("company_name"),
+                data.get("year")
+            )
 
-        response = update_year_engine(ids, year)
+        elif trigger == "update_year":
+            response = update_year(
+                data.get("parent_ids"),
+                data.get("year"),
+                data.get("client_name")
+            )
+
+        else:
+            response = {"error": "Unknown trigger"}
 
         self.send_response(200)
         self.send_header("Content-type", "application/json")
