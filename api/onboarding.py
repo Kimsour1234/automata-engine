@@ -55,6 +55,8 @@ def send_monitoring(automata, client, module, status, message):
     except Exception as e:
         print("Monitoring error:", e)
 
+
+
 # --------------------------------------------------
 # Automata Onboarding
 # --------------------------------------------------
@@ -99,9 +101,10 @@ def automata_onboarding(client_name, company_name, year):
         ]
 
         # ----------------------------
-        # 1) Dossier Client
+        # 1) Dossier Client (nom complet ajouté ici)
         # ----------------------------
-        client_folder = create_folder(drive, client_name, clients_root)
+        folder_name = f"{client_name} {company_name}".strip()
+        client_folder = create_folder(drive, folder_name, clients_root)
 
         # ----------------------------
         # 2) FACTURES / année / 12 mois
@@ -158,10 +161,10 @@ def automata_onboarding(client_name, company_name, year):
         # ----------------------------
         send_monitoring(
             automata="Onboarding",
-            client=client_name,
+            client=f"{client_name} {company_name}",
             module="Python Engine - Onboarding",
             status="Succès",
-            message=f"Onboarding complet pour {client_name}"
+            message=f"Onboarding complet pour {client_name} {company_name}"
         )
 
         return {
@@ -173,12 +176,13 @@ def automata_onboarding(client_name, company_name, year):
         # Monitoring Erreur
         send_monitoring(
             automata="Onboarding",
-            client=client_name,
+            client=f"{client_name} {company_name}",
             module="Python Engine - Onboarding",
             status="Erreur",
             message=str(e)
         )
         return {"status": "error", "message": str(e)}
+
 
 
 # --------------------------------------------------
@@ -193,7 +197,7 @@ class handler(BaseHTTPRequestHandler):
         data = json.loads(body.decode("utf-8"))
 
         client_name = data.get("client_name")          # Nom du client
-        company_name = data.get("company_name")        # Nom de l'entreprise (NOUVEAU)
+        company_name = data.get("company_name")        # Nom de l'entreprise
         year = int(data.get("year", 2025))
         trigger = data.get("trigger", "create_folders")
 
