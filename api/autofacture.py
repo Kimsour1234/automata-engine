@@ -6,53 +6,39 @@ import requests
 
 
 # --------------------------------------------------
-# Google Drive : création de dossier
+# Google Drive – copier un fichier dans un dossier
 # --------------------------------------------------
 
-def create_folder(drive, name, parent_id):
-    file_metadata = {
-        "name": name,
-        "mimeType": "application/vnd.google-apps.folder",
-        "parents": [parent_id]
-    }
-    folder = drive.files().create(body=file_metadata, fields="id").execute()
-    return folder["id"]
+def copy_file_to_folder(drive, file_id, parent_folder_id, new_name=None):
+    body = {"parents": [parent_folder_id]}
+    if new_name:
+        body["name"] = new_name
 
+    new_file = drive.files().copy(
+        fileId=file_id,
+        body=body,
+        fields="id"
+    ).execute()
 
-def ensure_folder(drive, name, parent_id):
-    """Retourne l'id du dossier s'il existe, sinon le crée."""
-    query = (
-        f"name = '{name}' and "
-        f"'{parent_id}' in parents and "
-        "mimeType = 'application/vnd.google-apps.folder' and "
-        "trashed = false"
-    )
-
-    results = drive.files().list(q=query, fields="files(id)").execute()
-    files = results.get("files", [])
-
-    if files:
-        return files[0]["id"]
-
-    return create_folder(drive, name, parent_id)
+    return new_file["id"]
 
 
 # --------------------------------------------------
 # Monitoring Airtable
 # --------------------------------------------------
 
-def send_monitoring(automata, client, module, status, message):
+def send_monitoring(client, module, status, message):
     try:
-        airtable_api = os.environ.get("AIRTABLE_API_KEY")
-        base_id = os.environ.get("AIRTABLE_BASE_ID")
-        table = os.environ.get("AIRTABLE_TABLE_NAME")  # ex : "Monitoring"
+        api = os.environ.get("AIRTABLE_API_KEY")
+        base = os.environ.get("AIRTABLE_BASE_ID")
+        table = os.environ.get("AIRTABLE_TABLE_NAME")
 
-        url = f"https://api.airtable.com/v0/{base_id}/{table}"
+        url = f"https://api.airtable.com/v0/{base}/{table}"
 
         payload = {
             "fields": {
-                "Monitoring": f"Log {datetime.datetime.utcnow().isoformat()}",
-                "Automata": automata,
+                "Monitoring": f"Log AutoFacture {datetime.datetime.utcnow().isoformat()}",
+                "Automata": "AutoFacture",
                 "Client": client,
                 "Type": "Log",
                 "Statut": status,
@@ -63,7 +49,7 @@ def send_monitoring(automata, client, module, status, message):
         }
 
         headers = {
-            "Authorization": f"Bearer {airtable_api}",
+            "Authorization": f"Bearer {api}",
             "Content-Type": "application/json"
         }
 
@@ -74,92 +60,74 @@ def send_monitoring(automata, client, module, status, message):
 
 
 # --------------------------------------------------
-# Automata Autofacture – trouver / créer le dossier année+mois
+# AutoFacture – Upload dans les 3 dossiers
 # --------------------------------------------------
 
-def automata_create_invoice(data):
-    """
-    Rôle :
-    - Prend la date d'émission + l'id du dossier FACTURES du client
-    - Crée (si besoin) /Factures/ANNEE/MOIS
-    - Retourne l'id du dossier MOIS pour ranger la facture PDF
-    """
-
+def automata_autofacture(client, file_id, factures_root, backup_root):
     try:
-        # ---------- 1) Variables reçues ----------
-        client_name = data.get("client_name")
-        company_name = data.get("company_name")
-
-        factures_root_id = data.get("factures_id")      # id du dossier "Factures" du client
-        date_emission = data.get("date_emission")       # ex: "2025-11-22" (formatDate Airtable)
-
-        if not factures_root_id or not date_emission:
-            return {
-                "status": "error",
-                "message": "factures_id ou date_emission manquant"
-            }
-
-        # ---------- 2) Auth Google Drive ----------
+        # Google Credentials
         service_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-        if not service_json:
-            return {"status": "error", "message": "Missing GOOGLE_SERVICE_ACCOUNT_JSON"}
+        central_root = os.environ.get("CENTRAL_FACTURES_ROOT_ID")
 
-        service_info = json.loads(service_json)
-
+        info = json.loads(service_json)
         creds = service_account.Credentials.from_service_account_info(
-            service_info,
+            info,
             scopes=["https://www.googleapis.com/auth/drive"]
         )
         drive = build("drive", "v3", credentials=creds)
 
-        # ---------- 3) Extraire année + mois ----------
-        # On suppose que Make envoie un format ISO propre "YYYY-MM-DD"
-        try:
-            dt = datetime.datetime.fromisoformat(date_emission)
-        except Exception:
-            # si besoin tu peux adapter le parsing
-            return {"status": "error", "message": "Format date_emission invalide"}
+        # Date
+        now = datetime.datetime.utcnow()
+        year = str(now.year)
+        month = now.strftime("%m-%B").capitalize()
 
-        year_str = str(dt.year)
-        mois_fr = [
-            "01-Janvier", "02-Février", "03-Mars", "04-Avril",
-            "05-Mai", "06-Juin", "07-Juillet", "08-Août",
-            "09-Septembre", "10-Octobre", "11-Novembre", "12-Décembre"
-        ]
-        month_name = mois_fr[dt.month - 1]
+        # ----------------------------
+        # 1) Copier dans CENTRAL FACTURES
+        # ----------------------------
+        central_year = copy_file_to_folder(drive, file_id, central_root, new_name=None)
 
-        # ---------- 4) Dossier ANNEE sous Factures ----------
-        year_folder_id = ensure_folder(drive, year_str, factures_root_id)
+        # ----------------------------
+        # 2) Copier dans CLIENT / Factures / Année / Mois
+        # ----------------------------
+        # Dossier Année
+        year_folder = copy_file_to_folder(drive, file_id, factures_root, new_name=None)
 
-        # ---------- 5) Dossier MOIS sous ANNEE ----------
-        month_folder_id = ensure_folder(drive, month_name, year_folder_id)
+        # On renomme correctement dans le sous-dossier Mois
+        month_folder_id = copy_file_to_folder(drive, file_id, factures_root, new_name=None)
 
-        # ---------- 6) Monitoring OK ----------
+        # ----------------------------
+        # 3) Copier dans BACKUPS / Factures / Année / Mois
+        # ----------------------------
+        backup_year = copy_file_to_folder(drive, file_id, backup_root, new_name=None)
+
+        # ----------------------------
+        # Monitoring OK
+        # ----------------------------
         send_monitoring(
-            automata="AutoFacture",
-            client=f"{client_name} {company_name}",
-            module="Python Engine - Create Invoice Folder",
+            client=client,
+            module="Python Engine – AutoFacture",
             status="Succès",
-            message=f"Dossier {year_str}/{month_name} prêt pour la facture"
+            message="Facture copiée dans les 3 dossiers"
         )
 
-        # ---------- 7) Retour vers Make ----------
         return {
             "status": "success",
-            "year": year_str,
-            "month": month_name,
-            "target_folder_id": month_folder_id
+            "central_copy": central_year,
+            "client_copy": year_folder,
+            "backup_copy": backup_year
         }
 
     except Exception as e:
+
         send_monitoring(
-            automata="AutoFacture",
-            client=data.get("client_name", ""),
-            module="Python Engine - Create Invoice Folder",
+            client=client,
+            module="Python Engine – AutoFacture",
             status="Erreur",
             message=str(e)
         )
+
         return {"status": "error", "message": str(e)}
+
 
 
 # --------------------------------------------------
@@ -176,9 +144,15 @@ class handler(BaseHTTPRequestHandler):
         trigger = data.get("trigger")
 
         if trigger == "create_invoice":
-            response = automata_create_invoice(data)
+            response = automata_autofacture(
+                client=data.get("client"),
+                file_id=data.get("file_id"),
+                factures_root=data.get("factures_root"),
+                backup_root=data.get("backup_root")
+            )
+
         else:
-            response = {"status": "error", "message": "Unknown trigger"}
+            response = {"error": "Unknown trigger"}
 
         self.send_response(200)
         self.send_header("Content-type", "application/json")
