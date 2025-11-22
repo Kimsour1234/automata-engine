@@ -27,7 +27,7 @@ def send_monitoring(automata, client, module, status, message):
     try:
         airtable_api = os.environ.get("AIRTABLE_API_KEY")
         base_id = os.environ.get("AIRTABLE_BASE_ID")
-        table = os.environ.get("AIRTABLE_TABLE_NAME")   # Monitoring
+        table = os.environ.get("AIRTABLE_TABLE_NAME")
 
         url = f"https://api.airtable.com/v0/{base_id}/{table}"
 
@@ -65,7 +65,7 @@ def automata_onboarding(client_name, company_name, year):
 
     try:
         # Variables Vercel
-        service_json = os.environ.get("Google_SERVICE_ACCOUNT_JSON")
+        service_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
         clients_root = os.environ.get("CLIENTS_ROOT_ID")
 
         if not service_json or not clients_root:
@@ -92,13 +92,13 @@ def automata_onboarding(client_name, company_name, year):
         ]
 
         # ----------------------------
-        # 1) Dossier Client (nom complet)
+        # 1) Dossier Client
         # ----------------------------
         folder_name = f"{client_name} {company_name}".strip()
         client_folder = create_folder(drive, folder_name, clients_root)
 
         # ----------------------------
-        # 2) FACTURES / année / mois
+        # 2) FACTURES / année / 12 mois
         # ----------------------------
         factures = create_folder(drive, "Factures", client_folder)
         factures_year = create_folder(drive, year_str, factures)
@@ -121,7 +121,7 @@ def automata_onboarding(client_name, company_name, year):
             create_folder(drive, m, backup_relances_year)
 
         # ----------------------------
-        # 4) DEVIS
+        # 4) DEVIS / année / 12 mois
         # ----------------------------
         devis = create_folder(drive, "Devis", client_folder)
         devis_year = create_folder(drive, year_str, devis)
@@ -129,7 +129,7 @@ def automata_onboarding(client_name, company_name, year):
             create_folder(drive, m, devis_year)
 
         # ----------------------------
-        # 5) DOCS → RELANCES
+        # 5) DOCS → RELANCES (R1/R2/R3)
         # ----------------------------
         docs = create_folder(drive, "Docs", client_folder)
         docs_relances = create_folder(drive, "Relances", docs)
@@ -139,7 +139,7 @@ def automata_onboarding(client_name, company_name, year):
         r3 = create_folder(drive, "R3", docs_relances)
 
         # ----------------------------
-        # 6) CONTRATS
+        # 6) CONTRATS / année / 12 mois
         # ----------------------------
         contrats = create_folder(drive, "Contrats", client_folder)
         contrats_year = create_folder(drive, year_str, contrats)
@@ -158,16 +158,20 @@ def automata_onboarding(client_name, company_name, year):
         )
 
         # ----------------------------
-        # RETOUR JSON COMPLET (tous les IDs)
+        # RETOUR COMPLET DES IDs
         # ----------------------------
         return {
             "status": "success",
+
             "client_folder_id_python": client_folder,
+
             "factures_folder_id_python": factures,
             "backups_factures_folder_id_python": backup_factures,
             "backups_relances_folder_id_python": backup_relances,
+
             "devis_folder_id_python": devis,
             "contrats_folder_id_python": contrats,
+
             "docs_relances_folder_id_python": docs_relances,
             "r1_folder_id_python": r1,
             "r2_folder_id_python": r2,
@@ -176,7 +180,6 @@ def automata_onboarding(client_name, company_name, year):
 
     except Exception as e:
 
-        # Monitoring Erreur
         send_monitoring(
             automata="Onboarding",
             client=f"{client_name} {company_name}",
