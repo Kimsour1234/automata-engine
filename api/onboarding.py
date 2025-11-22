@@ -33,12 +33,13 @@ def send_monitoring(automata, client, module, status, message):
 
         payload = {
             "fields": {
-                "automata": automata,
-                "client": client,
-                "module": module,
-                "statut": status,
-                "message": message,
-                "date": datetime.datetime.utcnow().isoformat()
+                "Automata": automata,
+                "Client": client,
+                "Type": "Log",
+                "Statut": status,   # "Succès" ou "Erreur"
+                "Module": module,
+                "Message": message,
+                "Date": datetime.datetime.utcnow().isoformat() + "Z"
             }
         }
 
