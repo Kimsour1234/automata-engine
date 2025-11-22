@@ -27,7 +27,7 @@ def send_monitoring(automata, client, module, status, message):
     try:
         airtable_api = os.environ.get("AIRTABLE_API_KEY")
         base_id = os.environ.get("AIRTABLE_BASE_ID")
-        table = os.environ.get("AIRTABLE_TABLE_NAME")
+        table = os.environ.get("AIRTABLE_TABLE_NAME")  # <- IMPORTANT : ton .env
 
         url = f"https://api.airtable.com/v0/{base_id}/{table}"
 
@@ -36,7 +36,7 @@ def send_monitoring(automata, client, module, status, message):
                 "Automata": automata,
                 "Client": client,
                 "Type": "Log",
-                "Statut": status,   # "Succès" ou "Erreur"
+                "Statut": status,
                 "Module": module,
                 "Message": message,
                 "Date": datetime.datetime.utcnow().isoformat() + "Z"
@@ -58,15 +58,17 @@ def send_monitoring(automata, client, module, status, message):
 # Automata Onboarding
 # --------------------------------------------------
 
-def automata_onboarding(client_name, year):
+def automata_onboarding(client_name):
+
     try:
-        # Lire variables Vercel
+        # Lecture des variables Vercel
         service_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
         clients_root = os.environ.get("CLIENTS_ROOT_ID")
 
         if not service_json or not clients_root:
             return {"error": "Missing environment variables"}
 
+        # Authentification Google
         service_info = json.loads(service_json)
 
         creds = service_account.Credentials.from_service_account_info(
@@ -76,53 +78,70 @@ def automata_onboarding(client_name, year):
 
         drive = build("drive", "v3", credentials=creds)
 
+        # Date dynamique
+        now = datetime.datetime.utcnow()
+        year_str = str(now.year)
+        month_str = now.strftime("%m-%B")   # ex: 11-Novembre
+
         # ----------------------------
-        # 1) Création dossier client
+        # 1) Dossier Client
         # ----------------------------
         client_folder = create_folder(drive, client_name, clients_root)
 
         # ----------------------------
-        # 2) Sous-dossiers principaux
+        # 2) FACTURES
         # ----------------------------
         factures = create_folder(drive, "Factures", client_folder)
-        docs = create_folder(drive, "Docs", client_folder)
+        factures_year = create_folder(drive, year_str, factures)
+        create_folder(drive, month_str, factures_year)
+
+        # ----------------------------
+        # 3) BACKUPS
+        # ----------------------------
         backups = create_folder(drive, "Backups", client_folder)
+
+        # Backups / Factures
+        backup_factures = create_folder(drive, "Factures", backups)
+        backup_factures_year = create_folder(drive, year_str, backup_factures)
+        create_folder(drive, month_str, backup_factures_year)
+
+        # Backups / Relances
+        backup_relances = create_folder(drive, "Relances", backups)
+        backup_relances_year = create_folder(drive, year_str, backup_relances)
+        create_folder(drive, month_str, backup_relances_year)
+
+        # ----------------------------
+        # 4) DEVIS
+        # ----------------------------
         devis = create_folder(drive, "Devis", client_folder)
-        contrats = create_folder(drive, "Contrats", client_folder)
+        devis_year = create_folder(drive, year_str, devis)
+        create_folder(drive, month_str, devis_year)
 
         # ----------------------------
-        # 3) ANNÉE + MOIS (Factures)
+        # 5) DOCS → RELANCES (R1/R2/R3)
         # ----------------------------
-        year_folder = create_folder(drive, str(year), factures)
-
-        months = [
-            "01-Janvier", "02-Février", "03-Mars", "04-Avril",
-            "05-Mai", "06-Juin", "07-Juillet", "08-Août",
-            "09-Septembre", "10-Octobre", "11-Novembre", "12-Décembre"
-        ]
-
-        for m in months:
-            create_folder(drive, m, year_folder)
-
-        # ----------------------------
-        # 4) Relances R1 / R2 / R3
-        # ----------------------------
-        relances = create_folder(drive, "Relances", docs)
-        year_relances = create_folder(drive, str(year), relances)
+        docs = create_folder(drive, "Docs", client_folder)
+        docs_relances = create_folder(drive, "Relances", docs)
 
         for r in ["R1", "R2", "R3"]:
-            create_folder(drive, r, year_relances)
+            create_folder(drive, r, docs_relances)
 
         # ----------------------------
-        # Monitoring
+        # 6) CONTRATS
         # ----------------------------
+        contrats = create_folder(drive, "Contrats", client_folder)
+        contrats_year = create_folder(drive, year_str, contrats)
+        create_folder(drive, month_str, contrats_year)
 
+        # ----------------------------
+        # Monitoring Succès
+        # ----------------------------
         send_monitoring(
-            automata="autodossier",
+            automata="Onboarding",
             client=client_name,
-            module="google drive",
-            status="success",
-            message="Onboarding complet OK"
+            module="Python Engine - Onboarding",
+            status="Succès",
+            message=f"Onboarding complet pour {client_name}"
         )
 
         return {
@@ -131,13 +150,16 @@ def automata_onboarding(client_name, year):
         }
 
     except Exception as e:
+
+        # Monitoring Erreur
         send_monitoring(
-            automata="autodossier",
+            automata="Onboarding",
             client=client_name,
-            module="google drive",
-            status="error",
+            module="Python Engine - Onboarding",
+            status="Erreur",
             message=str(e)
         )
+
         return {"status": "error", "message": str(e)}
 
 
@@ -153,11 +175,10 @@ class handler(BaseHTTPRequestHandler):
         data = json.loads(body.decode("utf-8"))
 
         client_name = data.get("client_name")
-        year = int(data.get("year", 2025))
         trigger = data.get("trigger", "create_folders")
 
         if trigger == "create_folders":
-            response = automata_onboarding(client_name, year)
+            response = automata_onboarding(client_name)
         else:
             response = {"error": "Unknown trigger"}
 
