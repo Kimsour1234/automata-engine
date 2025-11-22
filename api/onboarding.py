@@ -33,15 +33,15 @@ def send_monitoring(automata, client, module, status, message):
 
         payload = {
             "fields": {
-                "Monitoring": f"Log {datetime.datetime.utcnow().isoformat()}",  # <- CORRECT
-                "Automata": automata,
-                "Client": client,
-                "Type": "Log",
-                "Statut": status,
-                "Module": module,
-                "Message": message,
-                "Date": datetime.datetime.utcnow().isoformat() + "Z"
-            }
+    "Monitoring": "TEST MANUEL",
+    "Automata": "TestAuto",
+    "Client": "TestClient",
+    "Type": "Log",
+    "Statut": "Succès",
+    "Module": "TestModule",
+    "Message": "Test manuel API > Airtable",
+    "Date": "2025-11-22T00:00:00Z"
+  }
         }
 
         headers = {
