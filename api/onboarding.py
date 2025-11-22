@@ -59,7 +59,7 @@ def send_monitoring(automata, client, module, status, message):
 # Automata Onboarding
 # --------------------------------------------------
 
-def automata_onboarding(client_name):
+def automata_onboarding(client_name, company_name, year):
 
     try:
         # Variables Vercel
