@@ -27,33 +27,33 @@ def send_monitoring(automata, client, module, status, message):
     try:
         airtable_api = os.environ.get("AIRTABLE_API_KEY")
         base_id = os.environ.get("AIRTABLE_BASE_ID")
-        table = os.environ.get("AIRTABLE_TABLE_NAME")  # .env : Monitoring
+        table = os.environ.get("AIRTABLE_TABLE_NAME")
 
         url = f"https://api.airtable.com/v0/{base_id}/{table}"
 
         payload = {
-    "fields": {
-        "Monitoring": f"Log {datetime.datetime.utcnow().isoformat()}",
-        "Automata": automata,
-        "Client": client,
-        "Type": "Log",
-        "Statut": status,
-        "Module": module,
-        "Message": message,
-        "Date": datetime.datetime.utcnow().isoformat() + "Z"
-    }
-}
+            "fields": {
+                "Monitoring": f"Log {datetime.datetime.utcnow().isoformat()}",  # <- CORRECT
+                "Automata": automata,
+                "Client": client,
+                "Type": "Log",
+                "Statut": status,
+                "Module": module,
+                "Message": message,
+                "Date": datetime.datetime.utcnow().isoformat() + "Z"
+            }
+        }
 
         headers = {
             "Authorization": f"Bearer {airtable_api}",
             "Content-Type": "application/json"
         }
 
-        requests.post(url, json=payload, headers=headers)
+        r = requests.post(url, json=payload, headers=headers)
+        print("MONITORING:", r.status_code, r.text)
 
     except Exception as e:
         print("Monitoring error:", e)
-
 
 # --------------------------------------------------
 # Automata Onboarding
