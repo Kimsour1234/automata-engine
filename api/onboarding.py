@@ -173,9 +173,9 @@ def automata_onboarding(client_name, company_name, year):
             "contrats_folder_id_python": contrats,
 
             "docs_relances_folder_id_python": docs_relances,
-            "r1_folder_id_python": r1,
-            "r2_folder_id_python": r2,
-            "r3_folder_id_python": r3
+            "R1_folder_id_python": r1,
+            "R2_folder_id_python": r2,
+            "R3_folder_id_python": r3
         }
 
     except Exception as e:
