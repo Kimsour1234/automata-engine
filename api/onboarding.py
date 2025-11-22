@@ -27,21 +27,21 @@ def send_monitoring(automata, client, module, status, message):
     try:
         airtable_api = os.environ.get("AIRTABLE_API_KEY")
         base_id = os.environ.get("AIRTABLE_BASE_ID")
-        table = os.environ.get("AIRTABLE_TABLE_NAME")
+        table = os.environ.get("AIRTABLE_TABLE_NAME")   # Doit être : Monitoring
 
         url = f"https://api.airtable.com/v0/{base_id}/{table}"
 
         payload = {
             "fields": {
-    "Monitoring": "TEST MANUEL",
-    "Automata": "TestAuto",
-    "Client": "TestClient",
-    "Type": "Log",
-    "Statut": "Succès",
-    "Module": "TestModule",
-    "Message": "Test manuel API > Airtable",
-    "Date": "2025-11-22T00:00:00Z"
-  }
+                "Monitoring": f"Log {datetime.datetime.utcnow().isoformat()}",
+                "Automata": automata,
+                "Client": client,
+                "Type": "Log",
+                "Statut": status,
+                "Module": module,
+                "Message": message,
+                "Date": datetime.datetime.utcnow().isoformat() + "Z"
+            }
         }
 
         headers = {
