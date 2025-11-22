@@ -27,7 +27,7 @@ def send_monitoring(automata, client, module, status, message):
     try:
         airtable_api = os.environ.get("AIRTABLE_API_KEY")
         base_id = os.environ.get("AIRTABLE_BASE_ID")
-        table = os.environ.get("AIRTABLE_TABLE_NAME")  # <- IMPORTANT : ton .env
+        table = os.environ.get("AIRTABLE_TABLE_NAME")  # .env : Monitoring
 
         url = f"https://api.airtable.com/v0/{base_id}/{table}"
 
@@ -36,7 +36,7 @@ def send_monitoring(automata, client, module, status, message):
                 "Automata": automata,
                 "Client": client,
                 "Type": "Log",
-                "Statut": status,
+                "Statut": status,   # "Succès" / "Erreur"
                 "Module": module,
                 "Message": message,
                 "Date": datetime.datetime.utcnow().isoformat() + "Z"
@@ -61,14 +61,14 @@ def send_monitoring(automata, client, module, status, message):
 def automata_onboarding(client_name):
 
     try:
-        # Lecture des variables Vercel
+        # Variables Vercel
         service_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
         clients_root = os.environ.get("CLIENTS_ROOT_ID")
 
         if not service_json or not clients_root:
             return {"error": "Missing environment variables"}
 
-        # Authentification Google
+        # Auth Google
         service_info = json.loads(service_json)
 
         creds = service_account.Credentials.from_service_account_info(
@@ -78,10 +78,24 @@ def automata_onboarding(client_name):
 
         drive = build("drive", "v3", credentials=creds)
 
-        # Date dynamique
+        # Année + mois français
         now = datetime.datetime.utcnow()
         year_str = str(now.year)
-        month_str = now.strftime("%m-%B")   # ex: 11-Novembre
+
+        mois_fr = [
+            "01-Janvier",
+            "02-Février",
+            "03-Mars",
+            "04-Avril",
+            "05-Mai",
+            "06-Juin",
+            "07-Juillet",
+            "08-Août",
+            "09-Septembre",
+            "10-Octobre",
+            "11-Novembre",
+            "12-Décembre"
+        ]
 
         # ----------------------------
         # 1) Dossier Client
@@ -89,33 +103,37 @@ def automata_onboarding(client_name):
         client_folder = create_folder(drive, client_name, clients_root)
 
         # ----------------------------
-        # 2) FACTURES
+        # 2) FACTURES / année / 12 mois
         # ----------------------------
         factures = create_folder(drive, "Factures", client_folder)
         factures_year = create_folder(drive, year_str, factures)
-        create_folder(drive, month_str, factures_year)
+        for m in mois_fr:
+            create_folder(drive, m, factures_year)
 
         # ----------------------------
         # 3) BACKUPS
         # ----------------------------
         backups = create_folder(drive, "Backups", client_folder)
 
-        # Backups / Factures
+        # Backups / Factures / année / 12 mois
         backup_factures = create_folder(drive, "Factures", backups)
         backup_factures_year = create_folder(drive, year_str, backup_factures)
-        create_folder(drive, month_str, backup_factures_year)
+        for m in mois_fr:
+            create_folder(drive, m, backup_factures_year)
 
-        # Backups / Relances
+        # Backups / Relances / année / 12 mois
         backup_relances = create_folder(drive, "Relances", backups)
         backup_relances_year = create_folder(drive, year_str, backup_relances)
-        create_folder(drive, month_str, backup_relances_year)
+        for m in mois_fr:
+            create_folder(drive, m, backup_relances_year)
 
         # ----------------------------
-        # 4) DEVIS
+        # 4) DEVIS / année / 12 mois
         # ----------------------------
         devis = create_folder(drive, "Devis", client_folder)
         devis_year = create_folder(drive, year_str, devis)
-        create_folder(drive, month_str, devis_year)
+        for m in mois_fr:
+            create_folder(drive, m, devis_year)
 
         # ----------------------------
         # 5) DOCS → RELANCES (R1/R2/R3)
@@ -127,11 +145,12 @@ def automata_onboarding(client_name):
             create_folder(drive, r, docs_relances)
 
         # ----------------------------
-        # 6) CONTRATS
+        # 6) CONTRATS / année / 12 mois
         # ----------------------------
         contrats = create_folder(drive, "Contrats", client_folder)
         contrats_year = create_folder(drive, year_str, contrats)
-        create_folder(drive, month_str, contrats_year)
+        for m in mois_fr:
+            create_folder(drive, m, contrats_year)
 
         # ----------------------------
         # Monitoring Succès
@@ -150,7 +169,6 @@ def automata_onboarding(client_name):
         }
 
     except Exception as e:
-
         # Monitoring Erreur
         send_monitoring(
             automata="Onboarding",
@@ -159,7 +177,6 @@ def automata_onboarding(client_name):
             status="Erreur",
             message=str(e)
         )
-
         return {"status": "error", "message": str(e)}
 
 
