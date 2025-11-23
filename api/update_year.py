@@ -4,10 +4,32 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import requests
 
+
 # --------------------------------------------------
-# Create folder
+# Helper : créer ou récupérer un dossier
 # --------------------------------------------------
-def create_folder(drive, name, parent_id):
+def get_or_create_folder(drive, parent_id, name):
+    # Cherche un dossier avec ce nom dans le parent
+    query = (
+        f"'{parent_id}' in parents and "
+        f"name = '{name}' and "
+        "mimeType = 'application/vnd.google-apps.folder' and "
+        "trashed = false"
+    )
+
+    results = drive.files().list(
+        q=query,
+        spaces="drive",
+        fields="files(id, name)",
+        pageSize=1
+    ).execute()
+
+    files = results.get("files", [])
+    if files:
+        # Dossier déjà existant → on le réutilise
+        return files[0]["id"]
+
+    # Sinon on le crée
     body = {
         "name": name,
         "mimeType": "application/vnd.google-apps.folder",
@@ -18,7 +40,7 @@ def create_folder(drive, name, parent_id):
 
 
 # --------------------------------------------------
-# Monitoring
+# Monitoring Airtable
 # --------------------------------------------------
 def send_monitoring(status, message):
     try:
@@ -53,13 +75,15 @@ def send_monitoring(status, message):
 
 
 # --------------------------------------------------
-# UPDATE YEAR – Apply year + months to 12 folders
+# UPDATE YEAR – ajoute année + mois SANS doublons
 # --------------------------------------------------
 def automata_update_year(year_target, folders):
 
     try:
-        # Init Google
         service_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+        if not service_json:
+            return {"status": "error", "message": "Missing GOOGLE_SERVICE_ACCOUNT_JSON"}
+
         info = json.loads(service_json)
         creds = service_account.Credentials.from_service_account_info(
             info,
@@ -67,39 +91,43 @@ def automata_update_year(year_target, folders):
         )
         drive = build("drive", "v3", credentials=creds)
 
-        # Months
         mois_fr = [
             "01-Janvier", "02-Février", "03-Mars", "04-Avril",
             "05-Mai", "06-Juin", "07-Juillet", "08-Août",
             "09-Septembre", "10-Octobre", "11-Novembre", "12-Décembre"
         ]
 
-        # For each dynamic folder
         results = {}
+        count_parents = 0
 
         for key, folder_id in folders.items():
+            if not folder_id:
+                continue  # id vide → on saute
 
-            if folder_id is None or folder_id == "":
-                continue
+            # 1) Année (2026) dans ce dossier
+            year_folder_id = get_or_create_folder(drive, folder_id, year_target)
 
-            # Create YEAR inside this folder
-            year_folder = create_folder(drive, year_target, folder_id)
-
-            # Create 12 months
+            # 2) 12 mois dans cette année (sans doublons)
             for m in mois_fr:
-                create_folder(drive, m, year_folder)
+                get_or_create_folder(drive, year_folder_id, m)
 
-            results[key] = year_folder
+            results[key] = year_folder_id
+            count_parents += 1
 
-        # Monitoring OK
-        send_monitoring("Succès", f"Année {year_target} ajoutée dans 12 dossiers.")
+        send_monitoring(
+            "Succès",
+            f"Année {year_target} appliquée sur {count_parents} dossiers dynamiques (sans doublons)."
+        )
 
-        return {"status": "success", "year": year_target, "created": results}
+        return {
+            "status": "success",
+            "year": year_target,
+            "updated_folders": results
+        }
 
     except Exception as e:
         send_monitoring("Erreur", str(e))
         return {"status": "error", "message": str(e)}
-
 
 
 # --------------------------------------------------
@@ -108,15 +136,12 @@ def automata_update_year(year_target, folders):
 class handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
-
         length = int(self.headers.get("Content-Length"))
         data = json.loads(self.rfile.read(length).decode("utf-8"))
 
         trigger = data.get("trigger")
 
         if trigger == "update_year":
-
-            # Build dict of the 12 dynamic folders
             folders = {
                 "factures_root_id": data.get("factures_root_id"),
                 "archives_root_id": data.get("archives_root_id"),
@@ -137,12 +162,10 @@ class handler(BaseHTTPRequestHandler):
                 year_target=data.get("year"),
                 folders=folders
             )
-
         else:
             response = {"error": "Unknown trigger"}
 
-        # Return HTTP response
         self.send_response(200)
         self.send_header("Content-type", "application/json")
         self.end_headers()
-        self.wfile.write(json.dumps(response).encode())
+        self.wfile.write(json.dumps(response).encode("utf-8"))
