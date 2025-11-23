@@ -1,22 +1,21 @@
 from http.server import BaseHTTPRequestHandler
-import json, os
+import json, os, datetime
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-import datetime
 import requests
 
 
 # --------------------------------------------------
-# Google Drive — création de dossier
+# Google Drive – create a folder
 # --------------------------------------------------
 
 def create_folder(drive, name, parent_id):
-    body = {
+    metadata = {
         "name": name,
         "mimeType": "application/vnd.google-apps.folder",
         "parents": [parent_id]
     }
-    folder = drive.files().create(body=body, fields="id").execute()
+    folder = drive.files().create(body=metadata, fields="id").execute()
     return folder["id"]
 
 
@@ -24,7 +23,7 @@ def create_folder(drive, name, parent_id):
 # Monitoring Airtable
 # --------------------------------------------------
 
-def send_monitoring(status, message):
+def send_monitoring(module, status, message):
     try:
         api = os.environ.get("AIRTABLE_API_KEY")
         base = os.environ.get("AIRTABLE_BASE_ID")
@@ -34,12 +33,12 @@ def send_monitoring(status, message):
 
         payload = {
             "fields": {
-                "Monitoring": f"ColdStart {datetime.datetime.utcnow().isoformat()}",
-                "Automata": "ColdStart",
-                "Client": "System",
+                "Monitoring": f"Log Cold&Dark {datetime.datetime.utcnow().isoformat()}",
+                "Automata": "ColdAndDark",
+                "Client": "SYSTEM",
                 "Type": "Log",
                 "Statut": status,
-                "Module": "Python Engine – ColdStart",
+                "Module": module,
                 "Message": message,
                 "Date": datetime.datetime.utcnow().isoformat() + "Z"
             }
@@ -52,82 +51,131 @@ def send_monitoring(status, message):
 
         requests.post(url, json=payload, headers=headers)
 
-    except:
-        pass
+    except Exception as e:
+        print("Monitoring error:", e)
 
 
 
 # --------------------------------------------------
-# Automata Cold & Dark (provisoire)
+# Lecture Airtable pour récupérer les IDs racine
 # --------------------------------------------------
 
-def automata_cold_start():
+def load_root_ids():
+    api = os.environ.get("AIRTABLE_API_KEY")
+    base = os.environ.get("AIRTABLE_BASE_ID")
+    table = os.environ.get("AIRTABLE_CENTRAL_TABLE")  # ⚠️ Nouvelle variable !!
 
+    url = f"https://api.airtable.com/v0/{base}/{table}"
+
+    headers = {
+        "Authorization": f"Bearer {api}",
+        "Content-Type": "application/json"
+    }
+
+    r = requests.get(url, headers=headers).json()
+
+    record = r["records"][0]["fields"]
+
+    return {
+        "archives": record["archives_root_id"],
+        "factures": record["factures_root_id"],
+        "monitoring": record["monitoring_root_id"],
+        "relances": record["relances_root_id"]
+    }
+
+
+
+# --------------------------------------------------
+# COLD & DARK – structure complète
+# --------------------------------------------------
+
+def cold_and_dark():
     try:
-        # Credentials
+        # --- Load root IDs from Airtable ---
+        roots = load_root_ids()
+
+        archives_root = roots["archives"]
+        factures_root = roots["factures"]
+        monitoring_root = roots["monitoring"]
+        relances_root = roots["relances"]
+
+        # --- Prepare Google Drive ---
         service_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-        root_id = os.environ.get("CENTRAL_ROOT_ID")   # IMPORTANT
-
-        if not service_json or not root_id:
-            return {"error": "Missing environment variables"}
-
         info = json.loads(service_json)
 
         creds = service_account.Credentials.from_service_account_info(
             info,
             scopes=["https://www.googleapis.com/auth/drive"]
         )
+
         drive = build("drive", "v3", credentials=creds)
 
-        # -------------------------------------
-        # ▼ Création des dossiers fixes
-        # -------------------------------------
+        # Months
+        months = [
+            "01-Janvier", "02-Février", "03-Mars", "04-Avril",
+            "05-Mai", "06-Juin", "07-Juillet", "08-Août",
+            "09-Septembre", "10-Octobre", "11-Novembre", "12-Décembre"
+        ]
 
-        archives = create_folder(drive, "Archives", root_id)
-        factures = create_folder(drive, "Factures", root_id)
-        monitoring = create_folder(drive, "Monitoring", root_id)
-        relances = create_folder(drive, "Relances", root_id)
-        templates = create_folder(drive, "Templates", root_id)
+        year = str(datetime.datetime.utcnow().year)
 
-        # Monitoring dossier interne
-        logs = create_folder(drive, "Logs", monitoring)
+        # -------------------------------
+        # FACTURES / year / months
+        # -------------------------------
+        y_fact = create_folder(drive, year, factures_root)
+        for m in months:
+            create_folder(drive, m, y_fact)
 
-        # Retour API
+        # -------------------------------
+        # ARCHIVES / year / months
+        # -------------------------------
+        y_arc = create_folder(drive, year, archives_root)
+        for m in months:
+            create_folder(drive, m, y_arc)
+
+        # -------------------------------
+        # MONITORING / Logs / year / months
+        # -------------------------------
+        logs = create_folder(drive, "Logs", monitoring_root)
+        y_mon = create_folder(drive, year, logs)
+        for m in months:
+            create_folder(drive, m, y_mon)
+
+        # -------------------------------
+        # RELANCES / R1/R2/R3
+        # -------------------------------
+        create_folder(drive, "R1", relances_root)
+        create_folder(drive, "R2", relances_root)
+        create_folder(drive, "R3", relances_root)
+
+        # Monitoring OK
         send_monitoring(
+            module="Python Cold & Dark",
             status="Succès",
-            message="Cold & Dark provisoire OK — dossiers fixes créés"
+            message="Structure Cold & Dark générée avec succès"
         )
 
-        return {
-            "status": "success",
-            "root": root_id,
-            "archives": archives,
-            "factures": factures,
-            "monitoring": monitoring,
-            "logs": logs,
-            "relances": relances,
-            "templates": templates
-        }
+        return {"status": "success"}
 
     except Exception as e:
 
         send_monitoring(
+            module="Python Cold & Dark",
             status="Erreur",
             message=str(e)
         )
-
         return {"status": "error", "message": str(e)}
 
 
 
 # --------------------------------------------------
-# Server HTTP (Vercel)
+# HTTP Handler
 # --------------------------------------------------
 
 class handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
-        response = automata_cold_start()
+        response = cold_and_dark()
 
         self.send_response(200)
         self.send_header("Content-type", "application/json")
