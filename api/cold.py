@@ -60,7 +60,7 @@ def cold_start():
     try:
         # GOOGLE AUTH
         service_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-        root_id = os.environ.get("CENTRAL_DOGMA_ROOT_ID")
+        root_id = os.environ.get("CENTRAL_ROOT_ID")
 
         info = json.loads(service_json)
         creds = service_account.Credentials.from_service_account_info(
