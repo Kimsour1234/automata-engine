@@ -6,36 +6,36 @@ import requests
 
 
 # --------------------------------------------------
-# Google Drive : création dossier
+# Create Google Drive folder
 # --------------------------------------------------
 
-def create_folder(drive, name, parent_id):
-    file_metadata = {
+def create_folder(drive, name, parent):
+    body = {
         "name": name,
         "mimeType": "application/vnd.google-apps.folder",
-        "parents": [parent_id]
+        "parents": [parent]
     }
-    folder = drive.files().create(body=file_metadata, fields="id").execute()
+    folder = drive.files().create(body=body, fields="id").execute()
     return folder["id"]
 
 
 # --------------------------------------------------
-# Monitoring Airtable
+# Send Monitoring Log
 # --------------------------------------------------
 
-def send_monitoring(module, status, message):
+def send_monitoring(automata, client, module, status, message):
     try:
-        airtable_api = os.environ.get("AIRTABLE_API_KEY")
-        base_id = os.environ.get("AIRTABLE_BASE_ID")
-        table = os.environ.get("AIRTABLE_TABLE_NAME")
+        api = os.environ.get("AIRTABLE_API_KEY")
+        base = os.environ.get("AIRTABLE_BASE_ID")
+        table = os.environ.get("AIRTABLE_MONITORING_TABLE")
 
-        url = f"https://api.airtable.com/v0/{base_id}/{table}"
+        url = f"https://api.airtable.com/v0/{base}/{table}"
 
         payload = {
             "fields": {
-                "Monitoring": f"ColdStart {datetime.datetime.utcnow().isoformat()}",
-                "Automata": "ColdStart",
-                "Client": "SYSTEM",
+                "Monitoring": f"Log {datetime.datetime.utcnow().isoformat()}",
+                "Automata": automata,
+                "Client": client,
                 "Type": "Log",
                 "Statut": status,
                 "Module": module,
@@ -45,116 +45,118 @@ def send_monitoring(module, status, message):
         }
 
         headers = {
-            "Authorization": f"Bearer {airtable_api}",
+            "Authorization": f"Bearer {api}",
             "Content-Type": "application/json"
         }
 
         requests.post(url, json=payload, headers=headers)
 
     except Exception as e:
-        print("Monitoring error:", e)
+        print("Monitoring error:", str(e))
 
 
 
 # --------------------------------------------------
-# Cold Start – construction du Central Dogma
+# COLD START – Create Central Dogma
 # --------------------------------------------------
 
-def automata_cold_start(root_id):
+def automata_coldstart():
 
     try:
-        # Credentials
+        root_id = os.environ.get("CENTRAL_ROOT_ID")
         service_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-        info = json.loads(service_json)
 
+        if not root_id or not service_json:
+            return {"error": "Missing environment variables"}
+
+        info = json.loads(service_json)
         creds = service_account.Credentials.from_service_account_info(
             info,
             scopes=["https://www.googleapis.com/auth/drive"]
         )
         drive = build("drive", "v3", credentials=creds)
 
-        # Mois français
-        months = [
+        # -------------------------------
+        # Create fixed folders
+        # -------------------------------
+
+        clients = create_folder(drive, "Clients", root_id)
+        factures = create_folder(drive, "Factures", root_id)
+        archives = create_folder(drive, "Archives", root_id)
+        monitoring = create_folder(drive, "Monitoring", root_id)
+        templates = create_folder(drive, "Templates", root_id)
+
+        # Monitoring/Logs
+        monitoring_logs = create_folder(drive, "Logs", monitoring)
+
+        # -------------------------------
+        # Dynamic folders (année/mois)
+        # -------------------------------
+        now = datetime.datetime.utcnow()
+        year = str(now.year)
+
+        mois_fr = [
             "01-Janvier", "02-Février", "03-Mars", "04-Avril",
             "05-Mai", "06-Juin", "07-Juillet", "08-Août",
             "09-Septembre", "10-Octobre", "11-Novembre", "12-Décembre"
         ]
 
-        now_year = str(datetime.datetime.utcnow().year)
-
-        # --------------------------------------------------
-        # 1) ARCHIVES
-        # --------------------------------------------------
-        archives_id = create_folder(drive, "Archives", root_id)
-        archives_year = create_folder(drive, now_year, archives_id)
-        for m in months:
-            create_folder(drive, m, archives_year)
-
-        # --------------------------------------------------
-        # 2) FACTURES (Dynamique année/mois)
-        # --------------------------------------------------
-        factures_id = create_folder(drive, "Factures", root_id)
-        factures_year = create_folder(drive, now_year, factures_id)
-        for m in months:
+        # Factures/Année
+        factures_year = create_folder(drive, year, factures)
+        for m in mois_fr:
             create_folder(drive, m, factures_year)
 
-        # --------------------------------------------------
-        # 3) MONITORING
-        # --------------------------------------------------
-        monitoring_id = create_folder(drive, "Monitoring", root_id)
-        logs_id = create_folder(drive, "Logs", monitoring_id)
+        # Archives/Année
+        archives_year = create_folder(drive, year, archives)
+        for m in mois_fr:
+            create_folder(drive, m, archives_year)
 
-        # --------------------------------------------------
-        # 4) TEMPLATES
-        # --------------------------------------------------
-        templates_id = create_folder(drive, "Templates", root_id)
+        # -------------------------------
+        # Send monitoring OK
+        # -------------------------------
 
-        templates_factures = create_folder(drive, "Factures", templates_id)
-        templates_devis = create_folder(drive, "Devis", templates_id)
-        templates_contrats = create_folder(drive, "Contrats", templates_id)
-
-        # --------------------------------------------------
-        # Monitoring
-        # --------------------------------------------------
         send_monitoring(
-            module="ColdStart",
+            automata="ColdStart",
+            client="System",
+            module="Python Engine – ColdStart",
             status="Succès",
-            message="Cold Start terminé – Central Dogma initialisé"
+            message="Central Dogma initial créé avec succès"
         )
 
-        # --------------------------------------------------
-        # Retour
-        # --------------------------------------------------
+        # -------------------------------
+        # Return IDs for Airtable
+        # -------------------------------
+
         return {
             "status": "success",
 
-            "archives_id": archives_id,
-            "archives_year_id": archives_year,
+            "clients_id": clients,
+            "factures_id": factures,
+            "archives_id": archives,
+            "monitoring_id": monitoring,
+            "monitoring_logs_id": monitoring_logs,
+            "templates_id": templates,
 
-            "factures_id": factures_id,
             "factures_year_id": factures_year,
-
-            "monitoring_id": monitoring_id,
-            "logs_id": logs_id,
-
-            "templates_id": templates_id,
-            "templates_factures_id": templates_factures,
-            "templates_devis_id": templates_devis,
-            "templates_contrats_id": templates_contrats
+            "archives_year_id": archives_year
         }
 
     except Exception as e:
+
         send_monitoring(
-            module="ColdStart",
+            automata="ColdStart",
+            client="System",
+            module="Python Engine – ColdStart",
             status="Erreur",
             message=str(e)
         )
+
         return {"status": "error", "message": str(e)}
 
 
 
 # --------------------------------------------------
-# Serveur HTTP Vercel
+# HTTP handler
 # --------------------------------------------------
 
 class handler(BaseHTTPRequestHandler):
@@ -168,9 +170,7 @@ class handler(BaseHTTPRequestHandler):
         trigger = data.get("trigger")
 
         if trigger == "cold_start":
-            response = automata_cold_start(
-                root_id=data.get("root_id")
-            )
+            response = automata_coldstart()
         else:
             response = {"error": "Unknown trigger"}
 
