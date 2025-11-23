@@ -2,106 +2,127 @@ from http.server import BaseHTTPRequestHandler
 import json, os, datetime
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+import requests
 
-# ---------------------------------------------
-# Créer un sous-dossier dans un dossier
-# ---------------------------------------------
-def create_folder(drive, name, parent):
+
+# --------------------------------------------------
+# Google Drive – création dossier
+# --------------------------------------------------
+
+def create_folder(drive, name, parent_id):
     metadata = {
         "name": name,
         "mimeType": "application/vnd.google-apps.folder",
-        "parents": [parent]
+        "parents": [parent_id]
     }
     folder = drive.files().create(body=metadata, fields="id").execute()
     return folder["id"]
 
-# ---------------------------------------------
-# Créer l'arborescence dynamique année + mois
-# ---------------------------------------------
-def create_year_and_months(drive, root_id, year):
-    year_id = create_folder(drive, year, root_id)
 
-    months = [
-        "01-Janvier", "02-Février", "03-Mars", "04-Avril",
-        "05-Mai", "06-Juin", "07-Juillet", "08-Août",
-        "09-Septembre", "10-Octobre", "11-Novembre", "12-Décembre"
-    ]
+# --------------------------------------------------
+# Monitoring Airtable
+# --------------------------------------------------
 
-    for m in months:
-        create_folder(drive, m, year_id)
+def send_monitoring(module, status, message):
+    try:
+        api = os.environ.get("AIRTABLE_API_KEY")
+        base = os.environ.get("AIRTABLE_BASE_ID")
+        table = os.environ.get("AIRTABLE_TABLE_NAME")
 
-    return year_id
+        url = f"https://api.airtable.com/v0/{base}/{table}"
 
-# ---------------------------------------------
-# Moteur COLD & START
-# ---------------------------------------------
-def cold_and_start():
-    # Lecture variables Vercel
-    service_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-    central_root = os.environ.get("CENTRAL_ROOT_ID")
-    base_id = os.environ.get("AIRTABLE_BASE_ID")
-    api_key = os.environ.get("AIRTABLE_API_KEY")
-    table_name = os.environ.get("AIRTABLE_COLD_TABLE", "Cold")
+        payload = {
+            "fields": {
+                "Monitoring": f"Log ColdStart {datetime.datetime.utcnow().isoformat()}",
+                "Automata": "ColdStart",
+                "Client": "SYSTEM",
+                "Type": "ColdStart",
+                "Statut": status,
+                "Module": module,
+                "Message": message,
+                "Date": datetime.datetime.utcnow().isoformat() + "Z"
+            }
+        }
 
-    if not central_root:
-        return {"status": "error", "message": "CENTRAL_ROOT_ID manquant"}
+        headers = {
+            "Authorization": f"Bearer {api}",
+            "Content-Type": "application/json"
+        }
 
-    # Auth Google
-    info = json.loads(service_json)
-    creds = service_account.Credentials.from_service_account_info(
-        info,
-        scopes=["https://www.googleapis.com/auth/drive"]
-    )
-    drive = build("drive", "v3", credentials=creds)
+        requests.post(url, json=payload, headers=headers)
 
-    # Récupération de l'unique ligne Airtable
-    import requests
-    url = f"https://api.airtable.com/v0/{base_id}/{table_name}"
-    headers = {"Authorization": f"Bearer {api_key}"}
-    r = requests.get(url, headers=headers).json()
+    except Exception as e:
+        print("Monitoring error:", e)
 
-    record_id = r["records"][0]["id"]
-    fields = r["records"][0]["fields"]
 
-    factures_root = fields.get("factures_root_id")
-    archives_root = fields.get("archives_root_id")
-    monitoring_root = fields.get("monitoring_root_id")
+# --------------------------------------------------
+# ColdStart — Création structure centrale
+# --------------------------------------------------
 
-    # On crée les dossiers si absents
-    if not factures_root:
-        new_id = create_folder(drive, "Factures", central_root)
-        fields["factures_root_id"] = new_id
+def automata_coldstart():
 
-    if not archives_root:
-        new_id = create_folder(drive, "Archives", central_root)
-        fields["archives_root_id"] = new_id
+    try:
+        # Credentials Google
+        service_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+        central_root = os.environ.get("CENTRAL_ROOT_ID")
 
-    if not monitoring_root:
-        new_id = create_folder(drive, "Monitoring", central_root)
-        logs_id = create_folder(drive, "Logs", new_id)
-        fields["monitoring_root_id"] = logs_id
+        if not service_json or not central_root:
+            return {"error": "Missing environment variables"}
 
-    # On met à jour Airtable
-    payload = {"fields": fields}
-    requests.patch(url + "/" + record_id, json=payload, headers={
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    })
+        info = json.loads(service_json)
 
-    # Création dynamique année + mois
-    year = str(datetime.datetime.utcnow().year)
-    create_year_and_months(drive, fields["factures_root_id"], year)
-    create_year_and_months(drive, fields["archives_root_id"], year)
-    create_year_and_months(drive, fields["monitoring_root_id"], year)
+        creds = service_account.Credentials.from_service_account_info(
+            info,
+            scopes=["https://www.googleapis.com/auth/drive"]
+        )
 
-    return {"status": "success", "message": "Cold & Start OK"}
+        drive = build("drive", "v3", credentials=creds)
 
-# ---------------------------------------------
-# Serveur HTTP (Vercel)
-# ---------------------------------------------
+        # --- Création des dossiers principaux ---
+        factures_root = create_folder(drive, "Factures", central_root)
+        archives_root = create_folder(drive, "Archives", central_root)
+        templates_root = create_folder(drive, "Templates", central_root)
+
+        # --- Sous-dossiers Templates ---
+        create_folder(drive, "Factures", templates_root)
+        create_folder(drive, "Devis", templates_root)
+        create_folder(drive, "Contrats", templates_root)
+        create_folder(drive, "Relances", templates_root)
+
+        # --- Monitoring OK ---
+        send_monitoring(
+            module="ColdStart Engine",
+            status="Succès",
+            message="ColdStart terminé – structure centrale créée."
+        )
+
+        # --- Retour des 3 IDs fixes ---
+        return {
+            "status": "success",
+            "factures_root_id": factures_root,
+            "archives_root_id": archives_root,
+            "templates_root_id": templates_root
+        }
+
+    except Exception as e:
+
+        send_monitoring(
+            module="ColdStart Engine",
+            status="Erreur",
+            message=str(e)
+        )
+
+        return {"status": "error", "message": str(e)}
+
+
+# --------------------------------------------------
+# Serveur HTTP Vercel
+# --------------------------------------------------
+
 class handler(BaseHTTPRequestHandler):
+
     def do_POST(self):
-        response = cold_and_start()
+        response = automata_coldstart()
 
         self.send_response(200)
         self.send_header("Content-type", "application/json")
