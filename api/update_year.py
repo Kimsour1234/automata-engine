@@ -4,10 +4,10 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import requests
 
-# --------------------------------------------------
-# FONCTION : Créer un dossier
-# --------------------------------------------------
 
+# --------------------------------------------------
+# Create folder
+# --------------------------------------------------
 def create_folder(drive, name, parent_id):
     body = {
         "name": name,
@@ -19,10 +19,9 @@ def create_folder(drive, name, parent_id):
 
 
 # --------------------------------------------------
-# Monitoring Airtable
+# Monitoring
 # --------------------------------------------------
-
-def send_monitoring(module, status, message):
+def send_monitoring(client, module, status, message):
     try:
         api = os.environ.get("AIRTABLE_API_KEY")
         base = os.environ.get("AIRTABLE_BASE_ID")
@@ -32,9 +31,9 @@ def send_monitoring(module, status, message):
 
         payload = {
             "fields": {
-                "Monitoring": f"Log {datetime.datetime.utcnow().isoformat()}",
-                "Automata": "ColdStart",
-                "Client": "-",
+                "Monitoring": f"Log UpdateYear {datetime.datetime.utcnow().isoformat()}",
+                "Automata": "UpdateYear",
+                "Client": client,
                 "Type": "Log",
                 "Statut": status,
                 "Module": module,
@@ -54,93 +53,98 @@ def send_monitoring(module, status, message):
         print("Monitoring error:", e)
 
 
-# --------------------------------------------------
-# Automata – Cold & Start
-# --------------------------------------------------
 
-def automata_coldstart():
+# --------------------------------------------------
+# AUTOMATA – Update Year (Central + Client)
+# --------------------------------------------------
+def automata_update_year(payload):
 
     try:
-        # ENV
+        # ---- ENV ----
         service_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-        central_root = os.environ.get("CENTRAL_ROOT_ID")
-        clients_root = os.environ.get("CLIENTS_ROOT_ID")
-
-        if not service_json or not central_root or not clients_root:
-            return {"error": "Missing environment variables"}
-
-        # AUTH
         info = json.loads(service_json)
+
         creds = service_account.Credentials.from_service_account_info(
             info,
             scopes=["https://www.googleapis.com/auth/drive"]
         )
         drive = build("drive", "v3", credentials=creds)
 
-        # Année + mois
-        now = datetime.datetime.utcnow()
-        year_str = str(now.year)
+        # ---- INPUT ----
+        client = payload.get("client")
+        year_target = payload.get("year")
 
+        # CENTRAL FIXES
+        central_factures = payload.get("central_factures")
+        central_archives = payload.get("central_archives")
+        central_monitoring = payload.get("central_monitoring")
+
+        # CLIENT FIXES
+        factures_id = payload.get("factures_id")
+        backup_factures_id = payload.get("backup_factures_id")
+        backup_relances_id = payload.get("backup_relances_id")
+        devis_id = payload.get("devis_id")
+        contrats_id = payload.get("contrats_id")
+
+        # ---- Mois ----
         mois_fr = [
             "01-Janvier", "02-Février", "03-Mars", "04-Avril",
             "05-Mai", "06-Juin", "07-Juillet", "08-Août",
             "09-Septembre", "10-Octobre", "11-Novembre", "12-Décembre"
         ]
 
-        # --------------------------------------------------
-        # 1) CENTRAL ROOT – Factures
-        # --------------------------------------------------
-        central_factures = create_folder(drive, "Factures", central_root)
-        central_factures_year = create_folder(drive, year_str, central_factures)
-        for m in mois_fr:
-            create_folder(drive, m, central_factures_year)
+        # ----------------------------
+        # CENTRAL ROOT → année + mois
+        # ----------------------------
+        central_year_factures = create_folder(drive, year_target, central_factures)
+        central_year_archives = create_folder(drive, year_target, central_archives)
+        central_year_monitoring = create_folder(drive, year_target, central_monitoring)
 
-        # --------------------------------------------------
-        # 2) CENTRAL ROOT – Archives
-        # --------------------------------------------------
-        central_archives = create_folder(drive, "Archives", central_root)
-        central_archives_year = create_folder(drive, year_str, central_archives)
         for m in mois_fr:
-            create_folder(drive, m, central_archives_year)
+            create_folder(drive, m, central_year_factures)
+            create_folder(drive, m, central_year_archives)
+            create_folder(drive, m, central_year_monitoring)
 
-        # --------------------------------------------------
-        # 3) CENTRAL ROOT – Monitoring / Logs
-        # --------------------------------------------------
-        monitoring = create_folder(drive, "Monitoring", central_root)
-        monitoring_logs = create_folder(drive, "Logs", monitoring)
-        monitoring_year = create_folder(drive, year_str, monitoring_logs)
+        # ----------------------------
+        # CLIENT ROOT → année + mois
+        # ----------------------------
+        year_factures = create_folder(drive, year_target, factures_id)
+        year_backup_factures = create_folder(drive, year_target, backup_factures_id)
+        year_backup_relances = create_folder(drive, year_target, backup_relances_id)
+        year_devis = create_folder(drive, year_target, devis_id)
+        year_contrats = create_folder(drive, year_target, contrats_id)
+
         for m in mois_fr:
-            create_folder(drive, m, monitoring_year)
+            create_folder(drive, m, year_factures)
+            create_folder(drive, m, year_backup_factures)
+            create_folder(drive, m, year_backup_relances)
+            create_folder(drive, m, year_devis)
+            create_folder(drive, m, year_contrats)
 
-        # --------------------------------------------------
         # Monitoring OK
-        # --------------------------------------------------
         send_monitoring(
-            module="ColdStart",
+            client=client,
+            module="Python Engine – UpdateYear",
             status="Succès",
-            message="Cold & Start terminé avec succès (central root)"
+            message=f"Nouvelle année {year_target} générée (central + client)"
         )
 
-        return {
-            "status": "success",
-            "central_factures_id": central_factures,
-            "central_archives_id": central_archives,
-            "central_monitoring_logs_id": monitoring_logs
-        }
+        return {"status": "success"}
 
     except Exception as e:
         send_monitoring(
-            module="ColdStart",
+            client=client,
+            module="Python Engine – UpdateYear",
             status="Erreur",
             message=str(e)
         )
-        return {"error": str(e)}
+        return {"status": "error", "message": str(e)}
+
 
 
 # --------------------------------------------------
-# Serveur HTTP Vercel
+# HTTP SERVER
 # --------------------------------------------------
-
 class handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
@@ -151,8 +155,8 @@ class handler(BaseHTTPRequestHandler):
 
         trigger = data.get("trigger")
 
-        if trigger == "coldstart":
-            response = automata_coldstart()
+        if trigger == "update_year":
+            response = automata_update_year(data)
         else:
             response = {"error": "Unknown trigger"}
 
