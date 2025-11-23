@@ -6,30 +6,10 @@ import requests
 
 
 # --------------------------------------------------
-# Helper : créer ou récupérer un dossier
+# Google Drive : création d’un dossier
 # --------------------------------------------------
-def get_or_create_folder(drive, parent_id, name):
-    # Cherche un dossier avec ce nom dans le parent
-    query = (
-        f"'{parent_id}' in parents and "
-        f"name = '{name}' and "
-        "mimeType = 'application/vnd.google-apps.folder' and "
-        "trashed = false"
-    )
 
-    results = drive.files().list(
-        q=query,
-        spaces="drive",
-        fields="files(id, name)",
-        pageSize=1
-    ).execute()
-
-    files = results.get("files", [])
-    if files:
-        # Dossier déjà existant → on le réutilise
-        return files[0]["id"]
-
-    # Sinon on le crée
+def create_folder(drive, name, parent_id):
     body = {
         "name": name,
         "mimeType": "application/vnd.google-apps.folder",
@@ -42,29 +22,30 @@ def get_or_create_folder(drive, parent_id, name):
 # --------------------------------------------------
 # Monitoring Airtable
 # --------------------------------------------------
-def send_monitoring(status, message):
-    try:
-        api = os.environ.get("AIRTABLE_API_KEY")
-        base = os.environ.get("AIRTABLE_BASE_ID")
-        table = os.environ.get("AIRTABLE_TABLE_NAME")
 
-        url = f"https://api.airtable.com/v0/{base}/{table}"
+def send_monitoring(automata, client, module, status, message):
+    try:
+        airtable_api = os.environ.get("AIRTABLE_API_KEY")
+        base_id = os.environ.get("AIRTABLE_BASE_ID")
+        table = os.environ.get("AIRTABLE_TABLE_NAME")  # Monitoring
+
+        url = f"https://api.airtable.com/v0/{base_id}/{table}"
 
         payload = {
             "fields": {
                 "Monitoring": f"Log {datetime.datetime.utcnow().isoformat()}",
-                "Automata": "UpdateYear",
-                "Client": "-",
+                "Automata": automata,
+                "Client": client,
                 "Type": "Log",
                 "Statut": status,
-                "Module": "Python - UpdateYear",
+                "Module": module,
                 "Message": message,
                 "Date": datetime.datetime.utcnow().isoformat() + "Z"
             }
         }
 
         headers = {
-            "Authorization": f"Bearer {api}",
+            "Authorization": f"Bearer {airtable_api}",
             "Content-Type": "application/json"
         }
 
@@ -74,94 +55,145 @@ def send_monitoring(status, message):
         print("Monitoring error:", e)
 
 
+
 # --------------------------------------------------
-# UPDATE YEAR – ajoute année + mois SANS doublons
+# Automata – UpdateYear (Autodossier)
 # --------------------------------------------------
-def automata_update_year(year_target, folders):
+
+def automata_update_year(client,
+                         year_target,
+                         central_factures_id,
+                         central_archives_id,
+                         monitoring_logs_id,
+                         factures_id,
+                         backup_factures_id,
+                         devis_id,
+                         contrats_id):
 
     try:
+        # AUTH GOOGLE
         service_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-        if not service_json:
-            return {"status": "error", "message": "Missing GOOGLE_SERVICE_ACCOUNT_JSON"}
-
         info = json.loads(service_json)
+
         creds = service_account.Credentials.from_service_account_info(
             info,
             scopes=["https://www.googleapis.com/auth/drive"]
         )
         drive = build("drive", "v3", credentials=creds)
 
+        # Mois français
         mois_fr = [
             "01-Janvier", "02-Février", "03-Mars", "04-Avril",
             "05-Mai", "06-Juin", "07-Juillet", "08-Août",
             "09-Septembre", "10-Octobre", "11-Novembre", "12-Décembre"
         ]
 
-        results = {}
-        count_parents = 0
+        # --------------------------------------------------
+        # 1) CENTRAL ROOT – Factures
+        # --------------------------------------------------
+        year_central_factures = create_folder(drive, year_target, central_factures_id)
+        for m in mois_fr:
+            create_folder(drive, m, year_central_factures)
 
-        for key, folder_id in folders.items():
-            if not folder_id:
-                continue  # id vide → on saute
+        # --------------------------------------------------
+        # 2) CENTRAL ROOT – Archives
+        # --------------------------------------------------
+        year_central_archives = create_folder(drive, year_target, central_archives_id)
+        for m in mois_fr:
+            create_folder(drive, m, year_central_archives)
 
-            # 1) Année (2026) dans ce dossier
-            year_folder_id = get_or_create_folder(drive, folder_id, year_target)
+        # --------------------------------------------------
+        # 3) CENTRAL ROOT – Monitoring / Logs
+        # --------------------------------------------------
+        year_monitoring = create_folder(drive, year_target, monitoring_logs_id)
+        for m in mois_fr:
+            create_folder(drive, m, year_monitoring)
 
-            # 2) 12 mois dans cette année (sans doublons)
-            for m in mois_fr:
-                get_or_create_folder(drive, year_folder_id, m)
+        # --------------------------------------------------
+        # 4) CLIENT – Factures
+        # --------------------------------------------------
+        year_factures = create_folder(drive, year_target, factures_id)
+        for m in mois_fr:
+            create_folder(drive, m, year_factures)
 
-            results[key] = year_folder_id
-            count_parents += 1
+        # --------------------------------------------------
+        # 5) CLIENT – Backups / Factures
+        # --------------------------------------------------
+        year_backup_factures = create_folder(drive, year_target, backup_factures_id)
+        for m in mois_fr:
+            create_folder(drive, m, year_backup_factures)
+
+        # --------------------------------------------------
+        # 6) CLIENT – Devis
+        # --------------------------------------------------
+        year_devis = create_folder(drive, year_target, devis_id)
+        for m in mois_fr:
+            create_folder(drive, m, year_devis)
+
+        # --------------------------------------------------
+        # 7) CLIENT – Contrats
+        # --------------------------------------------------
+        year_contrats = create_folder(drive, year_target, contrats_id)
+        for m in mois_fr:
+            create_folder(drive, m, year_contrats)
+
+        # --------------------------------------------------
+        # ⚠️ AUCUNE ACTION SUR DOCS/RELANCES
+        # --------------------------------------------------
 
         send_monitoring(
-            "Succès",
-            f"Année {year_target} appliquée sur {count_parents} dossiers dynamiques (sans doublons)."
+            automata="UpdateYear",
+            client=client,
+            module="AutoDossier – UpdateYear",
+            status="Succès",
+            message=f"Dossiers  {year_target} créés"
         )
 
-        return {
-            "status": "success",
-            "year": year_target,
-            "updated_folders": results
-        }
+        return {"status": "success"}
 
     except Exception as e:
-        send_monitoring("Erreur", str(e))
+
+        send_monitoring(
+            automata="UpdateYear",
+            client=client,
+            module="AutoDossier – UpdateYear",
+            status="Erreur",
+            message=str(e)
+        )
         return {"status": "error", "message": str(e)}
 
 
+
 # --------------------------------------------------
-# HTTP SERVER
+# Serveur HTTP Vercel
 # --------------------------------------------------
+
 class handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
+
         length = int(self.headers.get("Content-Length"))
-        data = json.loads(self.rfile.read(length).decode("utf-8"))
+        body = self.rfile.read(length)
+        data = json.loads(body.decode("utf-8"))
 
         trigger = data.get("trigger")
 
         if trigger == "update_year":
-            folders = {
-                "factures_root_id": data.get("factures_root_id"),
-                "archives_root_id": data.get("archives_root_id"),
-                "monitoring_root_id": data.get("monitoring_root_id"),
-
-                "factures_folder_id_python": data.get("factures_folder_id_python"),
-                "backups_factures_folder_id_python": data.get("backups_factures_folder_id_python"),
-                "backups_relances_folder_id_python": data.get("backups_relances_folder_id_python"),
-                "devis_folder_id_python": data.get("devis_folder_id_python"),
-                "contrats_folder_id_python": data.get("contrats_folder_id_python"),
-                "docs_relances_folder_id_python": data.get("docs_relances_folder_id_python"),
-                "R1_folder_id_python": data.get("R1_folder_id_python"),
-                "R2_folder_id_python": data.get("R2_folder_id_python"),
-                "R3_folder_id_python": data.get("R3_folder_id_python")
-            }
 
             response = automata_update_year(
+                client=data.get("client"),
                 year_target=data.get("year"),
-                folders=folders
+
+                central_factures_id=data.get("central_factures_id"),
+                central_archives_id=data.get("central_archives_id"),
+                monitoring_logs_id=data.get("monitoring_logs_id"),
+
+                factures_id=data.get("factures_id"),
+                backup_factures_id=data.get("backup_factures_id"),
+                devis_id=data.get("devis_id"),
+                contrats_id=data.get("contrats_id")
             )
+
         else:
             response = {"error": "Unknown trigger"}
 
