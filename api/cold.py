@@ -6,7 +6,7 @@ import requests
 
 
 # --------------------------------------------------
-# Google Drive – create a folder
+# Google Drive – création de dossier
 # --------------------------------------------------
 
 def create_folder(drive, name, parent_id):
@@ -25,11 +25,11 @@ def create_folder(drive, name, parent_id):
 
 def send_monitoring(module, status, message):
     try:
-        api = os.environ.get("AIRTABLE_API_KEY")
-        base = os.environ.get("AIRTABLE_BASE_ID")
-        table = os.environ.get("AIRTABLE_TABLE_NAME")
+        airtable_api = os.environ.get("AIRTABLE_API_KEY")
+        base_id = os.environ.get("AIRTABLE_BASE_ID")
+        table_name = os.environ.get("AIRTABLE_TABLE_NAME")
 
-        url = f"https://api.airtable.com/v0/{base}/{table}"
+        url = f"https://api.airtable.com/v0/{base_id}/{table_name}"
 
         payload = {
             "fields": {
@@ -45,7 +45,7 @@ def send_monitoring(module, status, message):
         }
 
         headers = {
-            "Authorization": f"Bearer {api}",
+            "Authorization": f"Bearer {airtable_api}",
             "Content-Type": "application/json"
         }
 
@@ -55,26 +55,27 @@ def send_monitoring(module, status, message):
         print("Monitoring error:", e)
 
 
-
 # --------------------------------------------------
-# Lecture Airtable pour récupérer les IDs racine
+# Lecture Airtable : table "Cold" (IDs racine)
 # --------------------------------------------------
 
 def load_root_ids():
-    api = os.environ.get("AIRTABLE_API_KEY")
-    base = os.environ.get("AIRTABLE_BASE_ID")
-    table = os.environ.get("AIRTABLE_CENTRAL_TABLE")  # ⚠️ Nouvelle variable !!
+    airtable_api = os.environ.get("AIRTABLE_API_KEY")
+    base_id = os.environ.get("AIRTABLE_BASE_ID")
+    central_table = os.environ.get("AIRTABLE_CENTRAL_TABLE")  # Doit être "Cold"
 
-    url = f"https://api.airtable.com/v0/{base}/{table}"
+    url = f"https://api.airtable.com/v0/{base_id}/{central_table}"
 
     headers = {
-        "Authorization": f"Bearer {api}",
+        "Authorization": f"Bearer {airtable_api}",
         "Content-Type": "application/json"
     }
 
-    r = requests.get(url, headers=headers).json()
+    resp = requests.get(url, headers=headers)
+    data = resp.json()
 
-    record = r["records"][0]["fields"]
+    # On prend la première ligne de la table Cold
+    record = data["records"][0]["fields"]
 
     return {
         "archives": record["archives_root_id"],
@@ -84,14 +85,13 @@ def load_root_ids():
     }
 
 
-
 # --------------------------------------------------
-# COLD & DARK – structure complète
+# Cold & Dark – création de la structure dynamique
 # --------------------------------------------------
 
 def cold_and_dark():
     try:
-        # --- Load root IDs from Airtable ---
+        # 1) Charger les IDs racine depuis la table Cold
         roots = load_root_ids()
 
         archives_root = roots["archives"]
@@ -99,51 +99,50 @@ def cold_and_dark():
         monitoring_root = roots["monitoring"]
         relances_root = roots["relances"]
 
-        # --- Prepare Google Drive ---
+        # 2) Auth Google
         service_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-        info = json.loads(service_json)
+        service_info = json.loads(service_json)
 
         creds = service_account.Credentials.from_service_account_info(
-            info,
+            service_info,
             scopes=["https://www.googleapis.com/auth/drive"]
         )
-
         drive = build("drive", "v3", credentials=creds)
 
-        # Months
+        # 3) Année + mois
+        year = str(datetime.datetime.utcnow().year)
+
         months = [
             "01-Janvier", "02-Février", "03-Mars", "04-Avril",
             "05-Mai", "06-Juin", "07-Juillet", "08-Août",
             "09-Septembre", "10-Octobre", "11-Novembre", "12-Décembre"
         ]
 
-        year = str(datetime.datetime.utcnow().year)
-
-        # -------------------------------
-        # FACTURES / year / months
-        # -------------------------------
-        y_fact = create_folder(drive, year, factures_root)
+        # -----------------------------------
+        # FACTURES / année / 12 mois
+        # -----------------------------------
+        year_factures = create_folder(drive, year, factures_root)
         for m in months:
-            create_folder(drive, m, y_fact)
+            create_folder(drive, m, year_factures)
 
-        # -------------------------------
-        # ARCHIVES / year / months
-        # -------------------------------
-        y_arc = create_folder(drive, year, archives_root)
+        # -----------------------------------
+        # ARCHIVES / année / 12 mois
+        # -----------------------------------
+        year_archives = create_folder(drive, year, archives_root)
         for m in months:
-            create_folder(drive, m, y_arc)
+            create_folder(drive, m, year_archives)
 
-        # -------------------------------
-        # MONITORING / Logs / year / months
-        # -------------------------------
-        logs = create_folder(drive, "Logs", monitoring_root)
-        y_mon = create_folder(drive, year, logs)
+        # -----------------------------------
+        # MONITORING / Logs / année / 12 mois
+        # -----------------------------------
+        logs_root = create_folder(drive, "Logs", monitoring_root)
+        year_logs = create_folder(drive, year, logs_root)
         for m in months:
-            create_folder(drive, m, y_mon)
+            create_folder(drive, m, year_logs)
 
-        # -------------------------------
-        # RELANCES / R1/R2/R3
-        # -------------------------------
+        # -----------------------------------
+        # RELANCES / R1 / R2 / R3 (pas d'année)
+        # -----------------------------------
         create_folder(drive, "R1", relances_root)
         create_folder(drive, "R2", relances_root)
         create_folder(drive, "R3", relances_root)
@@ -152,30 +151,39 @@ def cold_and_dark():
         send_monitoring(
             module="Python Cold & Dark",
             status="Succès",
-            message="Structure Cold & Dark générée avec succès"
+            message=f"Structure dynamique créée pour l'année {year}"
         )
 
-        return {"status": "success"}
+        return {
+            "status": "success",
+            "year": year
+        }
 
     except Exception as e:
-
         send_monitoring(
             module="Python Cold & Dark",
             status="Erreur",
             message=str(e)
         )
-        return {"status": "error", "message": str(e)}
-
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
 
 # --------------------------------------------------
-# HTTP Handler
+# Serveur HTTP Vercel
 # --------------------------------------------------
 
 class handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         response = cold_and_dark()
+
+        self.send_response(200)
+        self.send_header("Content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(response).encode("utf-8"))
 
         self.send_response(200)
         self.send_header("Content-type", "application/json")
