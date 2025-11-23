@@ -6,24 +6,22 @@ import requests
 
 
 # --------------------------------------------------
-# Google Drive : création de dossier
+# Google Drive : création dossier
 # --------------------------------------------------
-
 def create_folder(drive, name, parent_id):
-    file_metadata = {
+    body = {
         "name": name,
         "mimeType": "application/vnd.google-apps.folder",
         "parents": [parent_id]
     }
-    folder = drive.files().create(body=file_metadata, fields="id").execute()
+    folder = drive.files().create(body=body, fields="id").execute()
     return folder["id"]
 
 
 # --------------------------------------------------
-# Monitoring Airtable
+# Monitoring
 # --------------------------------------------------
-
-def send_monitoring(automata, client, module, status, message):
+def send_monitoring(module, status, message):
     try:
         api = os.environ.get("AIRTABLE_API_KEY")
         base = os.environ.get("AIRTABLE_BASE_ID")
@@ -33,9 +31,9 @@ def send_monitoring(automata, client, module, status, message):
 
         payload = {
             "fields": {
-                "Monitoring": f"Log {datetime.datetime.utcnow().isoformat()}",
-                "Automata": automata,
-                "Client": client,
+                "Monitoring": f"ColdStart {datetime.datetime.utcnow().isoformat()}",
+                "Automata": "ColdStart",
+                "Client": "SYSTEM",
                 "Type": "Log",
                 "Statut": status,
                 "Module": module,
@@ -55,97 +53,82 @@ def send_monitoring(automata, client, module, status, message):
         print("Monitoring error:", e)
 
 
-
 # --------------------------------------------------
-# Cold Start – Création des dossiers dynamiques
+# Cold Start — crée toute la structure centrale
 # --------------------------------------------------
-
-def cold_start(root_id):
-
+def cold_start():
     try:
-        # Google Auth
+        # GOOGLE AUTH
         service_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-        info = json.loads(service_json)
+        root_id = os.environ.get("CENTRAL_DOGMA_ROOT_ID")
 
+        info = json.loads(service_json)
         creds = service_account.Credentials.from_service_account_info(
-            info,
-            scopes=["https://www.googleapis.com/auth/drive"]
+            info, scopes=["https://www.googleapis.com/auth/drive"]
         )
         drive = build("drive", "v3", credentials=creds)
 
-        # Dossiers fixes
-        archives = create_folder(drive, "Archives", root_id)
-        factures = create_folder(drive, "Factures", root_id)
-        monitoring = create_folder(drive, "Monitoring", root_id)
-        logs = create_folder(drive, "Logs", monitoring)
-
-        # Année + Mois
         now = datetime.datetime.utcnow()
         year = str(now.year)
 
-        mois_fr = [
-            "01-Janvier","02-Février","03-Mars","04-Avril",
-            "05-Mai","06-Juin","07-Juillet","08-Août",
-            "09-Septembre","10-Octobre","11-Novembre","12-Décembre"
+        months = [
+            "01-Janvier", "02-Février", "03-Mars", "04-Avril",
+            "05-Mai", "06-Juin", "07-Juillet", "08-Août",
+            "09-Septembre", "10-Octobre", "11-Novembre", "12-Décembre"
         ]
 
-        # Archives dynamique
-        arch_year = create_folder(drive, year, archives)
-        for m in mois_fr:
-            create_folder(drive, m, arch_year)
+        # -------------------------
+        # 1) FACTURES
+        # -------------------------
+        factures = create_folder(drive, "Factures", root_id)
+        year_factures = create_folder(drive, year, factures)
+        for m in months:
+            create_folder(drive, m, year_factures)
 
-        # Factures dynamique
-        fac_year = create_folder(drive, year, factures)
-        for m in mois_fr:
-            create_folder(drive, m, fac_year)
+        # -------------------------
+        # 2) ARCHIVES
+        # -------------------------
+        archives = create_folder(drive, "Archives", root_id)
+        year_archives = create_folder(drive, year, archives)
+        for m in months:
+            create_folder(drive, m, year_archives)
 
-        # Monitoring dynamique
-        log_year = create_folder(drive, year, logs)
-        for m in mois_fr:
-            create_folder(drive, m, log_year)
+        # -------------------------
+        # 3) MONITORING / Logs
+        # -------------------------
+        monitoring = create_folder(drive, "Monitoring", root_id)
+        logs = create_folder(drive, "Logs", monitoring)
+        year_logs = create_folder(drive, year, logs)
+        for m in months:
+            create_folder(drive, m, year_logs)
 
-        # Monitoring OK
-        send_monitoring(
-            automata="ColdStart",
-            client="SYSTEM",
-            module="Python Engine - ColdStart",
-            status="Succès",
-            message="Dossiers généraux créés"
-        )
+        # -------------------------
+        # 4) TEMPLATES
+        # -------------------------
+        templates = create_folder(drive, "Templates", root_id)
+        create_folder(drive, "Factures", templates)
+        create_folder(drive, "Devis", templates)
+        create_folder(drive, "Contrats", templates)
+        create_folder(drive, "Relances", templates)
 
+        # -------------------------
+        # SUCCESS LOG
+        # -------------------------
+        send_monitoring("ColdStart", "Succès", "Structure centrale créée")
         return {"status": "success"}
 
     except Exception as e:
-
-        send_monitoring(
-            automata="ColdStart",
-            client="SYSTEM",
-            module="Python Engine - ColdStart",
-            status="Erreur",
-            message=str(e)
-        )
-
+        send_monitoring("ColdStart", "Erreur", str(e))
         return {"status": "error", "message": str(e)}
 
 
 
 # --------------------------------------------------
-# Handler HTTP
+# HTTP VERCEL
 # --------------------------------------------------
-
 class handler(BaseHTTPRequestHandler):
-
     def do_POST(self):
-        length = int(self.headers.get("Content-Length"))
-        body = self.rfile.read(length)
-        data = json.loads(body.decode("utf-8"))
-
-        trigger = data.get("trigger")
-
-        if trigger == "cold":
-            response = cold_start(os.environ.get("CENTRAL_ROOT_ID"))
-        else:
-            response = {"error": "Unknown trigger"}
+        response = cold_start()
 
         self.send_response(200)
         self.send_header("Content-type", "application/json")
