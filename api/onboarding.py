@@ -188,3 +188,32 @@ def automata_onboarding(client_name, company_name, year):
             message=str(e)
         )
         return {"status": "error", "message": str(e)}
+
+
+
+# --------------------------------------------------
+# Serveur HTTP Vercel
+# --------------------------------------------------
+
+class handler(BaseHTTPRequestHandler):
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length"))
+        body = self.rfile.read(length)
+        data = json.loads(body.decode("utf-8"))
+
+        client_name = data.get("client_name")
+        company_name = data.get("company_name")
+        year = int(data.get("year", 2025))
+        trigger = data.get("trigger", "create_folders")
+
+        if trigger == "create_folders":
+            response = automata_onboarding(client_name, company_name, year)
+        else:
+            response = {"error": "Unknown trigger"}
+
+        self.send_response(200)
+        self.send_header("Content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(response).encode("utf-8"))
+
