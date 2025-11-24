@@ -1,32 +1,58 @@
-def send_monitoring(automata, client, module, step, status, message, metadata):
-    try:
-        airtable_api = os.environ.get("AIRTABLE_API_KEY")
-        base_id = os.environ.get("AIRTABLE_BASE_ID")
-        table = os.environ.get("AIRTABLE_TABLE_NAME")
+import os
+import json
+import requests
+from http.server import BaseHTTPRequestHandler
 
-        url = f"https://api.airtable.com/v0/{base_id}/{table}"
+AIRTABLE_API_KEY = os.environ["AIRTABLE_API_KEY"]
+AIRTABLE_BASE_ID = os.environ["AIRTABLE_BASE_ID"]
+AIRTABLE_TABLE_ID = os.environ["AIRTABLE_TABLE_ID"]
 
-        payload = {
-            "fields": {
-                "Monitoring": f"Log {datetime.datetime.utcnow().isoformat()}",
-                "Automata": automata,             # ex: "AutoFacture"
-                "Client": client,                 # ex: "CLI_024"
-                "Type": "Log",                    # toujours
-                "Statut": status,                 # success / error
-                "Module": module,                 # ex: "AutoFacture"
-                "Step": step,                     # ex: "gmail_send"
-                "Message": message,               # court
-                "Metadata": json.dumps(metadata), # optionnel mais utile
-                "Date": datetime.datetime.utcnow().isoformat() + "Z"
-            }
-        }
+class handler(BaseHTTPRequestHandler):
+
+    def do_POST(self):
+        content_length = int(self.headers["Content-Length"])
+        post_data = self.rfile.read(content_length)
+
+        try:
+            payload = json.loads(post_data)
+        except Exception as e:
+            self.send_response(400)
+            self.end_headers()
+            self.wfile.write(f"Invalid JSON: {e}".encode())
+            return
+
+        # Préparation du record Airtable
+        airtable_url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}"
 
         headers = {
-            "Authorization": f"Bearer {airtable_api}",
+            "Authorization": f"Bearer {AIRTABLE_API_KEY}",
             "Content-Type": "application/json"
         }
 
-        requests.post(url, json=payload, headers=headers)
+        data = {
+            "fields": {
+                "module": payload.get("module", ""),
+                "step": payload.get("step", ""),
+                "status": payload.get("status", ""),
+                "message": payload.get("message", ""),
+                "client_id": payload.get("client_id", ""),
+                "metadata": json.dumps(payload.get("metadata", {}))
+            }
+        }
 
-    except Exception as e:
-        print("ERROR MONITORING:", str(e))
+        try:
+            r = requests.post(airtable_url, headers=headers, json=data)
+
+            if r.status_code == 200 or r.status_code == 201:
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"OK")
+            else:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(f"Airtable error: {r.text}".encode())
+
+        except Exception as e:
+            self.send_response(500)
+            self.end_headers()
+            self.wfile.write(f"Request failed: {e}".encode())
