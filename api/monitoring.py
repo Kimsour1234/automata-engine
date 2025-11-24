@@ -3,19 +3,13 @@ import json
 import requests
 from http.server import BaseHTTPRequestHandler
 
-# ----------------------------
-# VARIABLES ENV (Vercel)
-# ----------------------------
 AIRTABLE_API_KEY = os.environ["AIRTABLE_API_KEY"]
 AIRTABLE_BASE_ID = os.environ["AIRTABLE_BASE_ID"]
-
-TABLE_NAME = "Monitoring"  # Nom exact de la table Airtable
-
+AIRTABLE_TABLE_NAME = os.environ["AIRTABLE_TABLE_NAME"]  # <--- tu utilises cette variable !
 
 class handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
-        # Lire le JSON envoyé par Make
         content_length = int(self.headers.get("Content-Length", 0))
         post_data = self.rfile.read(content_length)
 
@@ -27,17 +21,13 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(f"Invalid JSON: {e}".encode())
             return
 
-        # ----------------------------
-        # Construction requête Airtable
-        # ----------------------------
-        airtable_url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{TABLE_NAME}"
+        airtable_url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
 
         headers = {
             "Authorization": f"Bearer {AIRTABLE_API_KEY}",
             "Content-Type": "application/json"
         }
 
-        # Champs simples
         data = {
             "fields": {
                 "module": payload.get("module", ""),
@@ -47,9 +37,6 @@ class handler(BaseHTTPRequestHandler):
             }
         }
 
-        # ----------------------------
-        # Envoi vers Airtable
-        # ----------------------------
         try:
             r = requests.post(airtable_url, headers=headers, json=data)
 
